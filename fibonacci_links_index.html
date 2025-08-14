@@ -1,0 +1,228 @@
+<!doctype html>
+<html lang="pt-br">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Fibonacci Links — Infinite Glow</title>
+<style>
+  html,body {height:100%; margin:0; background:#05060a; overflow:hidden; font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, Arial, "Apple Color Emoji","Segoe UI Emoji"}
+  canvas {display:block; width:100%; height:100%}
+  .hud {position:fixed; left:12px; bottom:12px; color:#cbd5e1; font-size:12px; background:rgba(0,0,0,.35); padding:10px 12px; border-radius:12px; backdrop-filter: blur(6px); user-select:none}
+  .hud kbd {background: rgba(255,255,255,.08); padding:1px 6px; border-radius:6px; font-weight:600; box-shadow: inset 0 0 0 1px rgba(255,255,255,.06)}
+  .brand {position:fixed; right:12px; top:12px; font-size:12px; color:#64748b; user-select:none}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div class="hud" id="hud"></div>
+<div class="brand">Fibonacci Links</div>
+<script>
+(() => {
+// PRNG simples e determinístico
+function mulberry32(a){return function(){a|=0;a=a+0x6D2B79F5|0;var t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296}}
+
+// Seed via URL para novas variações a cada acesso
+const url = new URL(window.location.href);
+let seedParam = url.searchParams.get('seed');
+if(!seedParam){ seedParam = Math.floor(crypto.getRandomValues(new Uint32Array(1))[0]).toString(); url.searchParams.set('seed', seedParam); history.replaceState({}, '', url) }
+const seed = parseInt(seedParam,10)>>>0;
+const rand = mulberry32(seed);
+
+const phi = (1+Math.sqrt(5))/2;
+const goldenAngle = Math.PI*(3 - Math.sqrt(5));
+const dpr = Math.max(1, Math.min(2, window.devicePixelRatio||1));
+
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d', {alpha:false});
+let W=0,H=0,CX=0,CY=0;
+
+function resize(){
+  W = Math.floor(window.innerWidth*dpr);
+  H = Math.floor(window.innerHeight*dpr);
+  canvas.width = W; canvas.height = H;
+  canvas.style.width = Math.floor(W/dpr)+'px';
+  canvas.style.height = Math.floor(H/dpr)+'px';
+  CX = W/2; CY = H/2;
+  ctx.setTransform(1,0,0,1,0,0)
+}
+resize(); window.addEventListener('resize', resize);
+
+// Paleta dinâmica
+function hsl(h,s,l,a=1){ return `hsla(${h%360},${s}%,${l}%,${a})` }
+const baseHue = Math.floor(rand()*360);
+const hueShift = 137.508;
+
+// Quantidade de pontos e layout
+const fibChoices = [89, 144, 233, 377, 610, 987];
+const N = fibChoices[Math.floor(rand()*fibChoices.length)];
+let layout = ['spiral','circle','grid'][Math.floor(rand()*3)];
+
+// Geração de pontos
+let points = [];
+function regenPoints(){
+  points.length = 0;
+  const minDim = Math.min(W,H);
+  const R = minDim*0.44;
+  if(layout==='spiral'){
+    const c = R/Math.sqrt(N);
+    for(let i=0;i<N;i++){
+      const r = c*Math.sqrt(i+1);
+      const th = i*goldenAngle;
+      points.push({x: CX + r*Math.cos(th), y: CY + r*Math.sin(th)})
+    }
+  }else if(layout==='circle'){
+    for(let i=0;i<N;i++){
+      const th = i*goldenAngle;
+      points.push({x: CX + R*Math.cos(th), y: CY + R*Math.sin(th)})
+    }
+  }else{
+    const gx = Math.ceil(Math.sqrt(N));
+    const gy = gx;
+    const cell = Math.min(W/(gx+2), H/(gy+2));
+    const offx = CX - (gx-1)*cell/2;
+    const offy = CY - (gy-1)*cell/2;
+    for(let i=0;i<N;i++){
+      const idx = (i*377) % N;
+      const x = idx % gx;
+      const y = Math.floor(idx / gx);
+      points.push({x: offx + x*cell, y: offy + y*cell})
+    }
+  }
+}
+regenPoints();
+
+// Sequência de Fibonacci para saltos
+const fib = [0,1];
+for(let i=2;i<64;i++){ fib[i] = fib[i-1]+fib[i-2] }
+let curr = Math.floor(rand()*N);
+let fk = 2;
+let step = 0;
+let paused = false;
+let speed = 2; // segmentos por frame
+
+function nextIndex(i,k){ return (i + (fib[k] % N)) % N }
+
+// Desenho
+function line(p0, p1, w, glow, hue, alpha){
+  ctx.beginPath();
+  ctx.moveTo(p0.x, p0.y);
+  ctx.lineTo(p1.x, p1.y);
+  ctx.lineWidth = w*dpr;
+  ctx.shadowBlur = glow*dpr;
+  const c = hsl(hue, 90, 60, alpha);
+  ctx.strokeStyle = c;
+  ctx.shadowColor = c;
+  ctx.stroke()
+}
+
+function dot(p, r, hue, alpha){
+  ctx.beginPath();
+  ctx.arc(p.x, p.y, r*dpr, 0, Math.PI*2);
+  const c = hsl(hue, 70, 70, alpha);
+  ctx.fillStyle = c;
+  ctx.shadowBlur = 8*dpr;
+  ctx.shadowColor = c;
+  ctx.fill()
+}
+
+function drawPoints(){
+  ctx.globalCompositeOperation = 'lighter';
+  for(let i=0;i<N;i+=Math.floor(1+rand()*3)){
+    const p = points[i];
+    dot(p, 1.2, baseHue + i*0.2, 0.05)
+  }
+}
+
+// Linha remanescente brilha: previsão de próximos saltos com brilho pulsante
+function drawGlowForecast(localCurr, localFk, t){
+  const K = 150; // quantos segmentos à frente brilham
+  let i = localCurr;
+  let k = localFk;
+  for(let j=0;j<K;j++){
+    const to = nextIndex(i,k);
+    const p0 = points[i], p1 = points[to];
+    const prog = j/K;
+    const hue = baseHue + hueShift*prog + step*0.02;
+    const pulse = 0.5 + 0.5*Math.sin(t*0.06 + j*0.4);
+    const a = 0.06 * Math.pow(1-prog, 1.2) * pulse;
+    line(p0, p1, 0.6, 6, hue, a);
+    i = to; k++; if(k>=fib.length) k = 2;
+  }
+}
+
+function stepOnce(t){
+  const to = nextIndex(curr, fk);
+  const p0 = points[curr], p1 = points[to];
+  const hue = baseHue + step*0.8;
+  line(p0, p1, 1.6, 16, hue, 0.9);
+  curr = to; fk++; if(fk>=fib.length) fk = 2; step++
+}
+
+function tick(t){
+  if(!paused){
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.fillStyle = 'rgba(5,6,10,0.08)';
+    ctx.fillRect(0,0,W,H);
+
+    drawPoints();
+
+    ctx.globalCompositeOperation = 'lighter';
+    drawGlowForecast(curr, fk, t);
+
+    for(let s=0;s<speed;s++) stepOnce(t);
+  }
+  requestAnimationFrame(tick)
+}
+ctx.fillStyle = '#05060a';
+ctx.fillRect(0,0,W,H);
+requestAnimationFrame(tick);
+
+// HUD
+const hud = document.getElementById('hud');
+function updateHud(){
+  hud.innerHTML = [
+    `Seed ${seedParam}`,
+    `Layout ${layout}`,
+    `Pontos ${N}`,
+    `Velocidade ${speed} segs/frame` ,
+    `Controles`,
+    `Espaço Pausar`,
+    `R Recarregar com novo seed`,
+    `G Trocar layout`,
+    `S Salvar PNG`,
+    `↑ Aumentar velocidade`,
+    `↓ Diminuir velocidade`
+  ].join('<br>')
+}
+updateHud();
+
+function newSeed(){
+  const s = Math.floor(crypto.getRandomValues(new Uint32Array(1))[0]).toString();
+  const u = new URL(window.location.href);
+  u.searchParams.set('seed', s);
+  window.location.href = u.toString();
+}
+
+document.addEventListener('keydown', e=>{
+  if(e.key===' '){ paused = !paused; updateHud() }
+  else if(e.key==='s' || e.key==='S'){
+    const link = document.createElement('a');
+    link.download = `fibonacci-links-${seedParam}-${Date.now()}.png`;
+    link.href = canvas.toDataURL('image/png');
+    link.click()
+  }else if(e.key==='r' || e.key==='R'){ newSeed() }
+  else if(e.key==='g' || e.key==='G'){
+    const layouts = ['spiral','circle','grid'];
+    layout = layouts[(layouts.indexOf(layout)+1)%layouts.length];
+    regenPoints();
+    updateHud()
+  }else if(e.key==='ArrowUp'){ speed = Math.min(12, speed+1); updateHud() }
+  else if(e.key==='ArrowDown'){ speed = Math.max(1, speed-1); updateHud() }
+});
+
+window.addEventListener('click', ()=>{ newSeed() });
+window.addEventListener('resize', ()=>{ regenPoints() });
+})();
+</script>
+</body>
+</html>
